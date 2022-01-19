@@ -14,7 +14,6 @@
 #include "soc/soc.h"           // Disable brownout problems
 #include "soc/rtc_cntl_reg.h"  // Disable brownout problems
 #include "driver/rtc_io.h"
-#include <StringArray.h>
 #include <SPIFFS.h>
 #include <FS.h>
 #include <Firebase_ESP_Client.h>
