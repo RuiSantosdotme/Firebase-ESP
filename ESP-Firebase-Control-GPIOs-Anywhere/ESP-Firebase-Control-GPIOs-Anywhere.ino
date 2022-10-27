@@ -165,5 +165,8 @@ void setup(){
 }
 
 void loop(){
-
+  if (Firebase.isTokenExpired()){
+    Firebase.refreshToken(&config);
+    Serial.println("Refresh token");
+  }
 }
