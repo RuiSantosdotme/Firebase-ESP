@@ -8,13 +8,13 @@
   Based on the example provided by the ESP Firebase Client Library
 *********/
 
+#include "Arduino.h"
 #include "WiFi.h"
 #include "esp_camera.h"
-#include "Arduino.h"
 #include "soc/soc.h"           // Disable brownout problems
 #include "soc/rtc_cntl_reg.h"  // Disable brownout problems
 #include "driver/rtc_io.h"
-#include <SPIFFS.h>
+#include <LittleFS.h>
 #include <FS.h>
 #include <Firebase_ESP_Client.h>
 //Provide the token generation process info.
@@ -33,9 +33,12 @@ const char* password = "REPLACE_WITH_YOUR_PASSWORD";
 
 // Insert Firebase storage bucket ID e.g bucket-name.appspot.com
 #define STORAGE_BUCKET_ID "REPLACE_WITH_YOUR_STORAGE_BUCKET_ID"
+// For example:
+//#define STORAGE_BUCKET_ID "esp-iot-app.appspot.com"
 
-// Photo File Name to save in SPIFFS
-#define FILE_PHOTO "/data/photo.jpg"
+// Photo File Name to save in LittleFS
+#define FILE_PHOTO_PATH "/photo.jpg"
+#define BUCKET_PHOTO "/data/photo.jpg"
 
 // OV2640 camera module pins (CAMERA_MODEL_AI_THINKER)
 #define PWDN_GPIO_NUM     32
@@ -62,50 +65,49 @@ FirebaseData fbdo;
 FirebaseAuth auth;
 FirebaseConfig configF;
 
+void fcsUploadCallback(FCS_UploadStatusInfo info);
+
 bool taskCompleted = false;
 
-// Check if photo capture was successful
-bool checkPhoto( fs::FS &fs ) {
-  File f_pic = fs.open( FILE_PHOTO );
-  unsigned int pic_sz = f_pic.size();
-  return ( pic_sz > 100 );
-}
-
-// Capture Photo and Save it to SPIFFS
-void capturePhotoSaveSpiffs( void ) {
-  camera_fb_t * fb = NULL; // pointer
-  bool ok = 0; // Boolean indicating if the picture has been taken correctly
-  do {
-    // Take a photo with the camera
-    Serial.println("Taking a photo...");
-
+// Capture Photo and Save it to LittleFS
+void capturePhotoSaveLittleFS( void ) {
+  // Dispose first pictures because of bad quality
+  camera_fb_t* fb = NULL;
+  // Skip first 3 frames (increase/decrease number as needed).
+  for (int i = 0; i < 4; i++) {
     fb = esp_camera_fb_get();
-    if (!fb) {
-      Serial.println("Camera capture failed");
-      return;
-    }
-    // Photo file name
-    Serial.printf("Picture file name: %s\n", FILE_PHOTO);
-    File file = SPIFFS.open(FILE_PHOTO, FILE_WRITE);
-    // Insert the data in the photo file
-    if (!file) {
-      Serial.println("Failed to open file in writing mode");
-    }
-    else {
-      file.write(fb->buf, fb->len); // payload (image), payload length
-      Serial.print("The picture has been saved in ");
-      Serial.print(FILE_PHOTO);
-      Serial.print(" - Size: ");
-      Serial.print(file.size());
-      Serial.println(" bytes");
-    }
-    // Close the file
-    file.close();
     esp_camera_fb_return(fb);
+    fb = NULL;
+  }
+    
+  // Take a new photo
+  fb = NULL;  
+  fb = esp_camera_fb_get();  
+  if(!fb) {
+    Serial.println("Camera capture failed");
+    delay(1000);
+    ESP.restart();
+  }  
 
-    // check if file has been correctly saved in SPIFFS
-    ok = checkPhoto(SPIFFS);
-  } while ( !ok );
+  // Photo file name
+  Serial.printf("Picture file name: %s\n", FILE_PHOTO_PATH);
+  File file = LittleFS.open(FILE_PHOTO_PATH, FILE_WRITE);
+
+  // Insert the data in the photo file
+  if (!file) {
+    Serial.println("Failed to open file in writing mode");
+  }
+  else {
+    file.write(fb->buf, fb->len); // payload (image), payload length
+    Serial.print("The picture has been saved in ");
+    Serial.print(FILE_PHOTO_PATH);
+    Serial.print(" - Size: ");
+    Serial.print(fb->len);
+    Serial.println(" bytes");
+  }
+  // Close the file
+  file.close();
+  esp_camera_fb_return(fb);
 }
 
 void initWiFi(){
@@ -116,14 +118,14 @@ void initWiFi(){
   }
 }
 
-void initSPIFFS(){
-  if (!SPIFFS.begin(true)) {
-    Serial.println("An Error has occurred while mounting SPIFFS");
+void initLittleFS(){
+  if (!LittleFS.begin(true)) {
+    Serial.println("An Error has occurred while mounting LittleFS");
     ESP.restart();
   }
   else {
     delay(500);
-    Serial.println("SPIFFS mounted successfully");
+    Serial.println("LittleFS mounted successfully");
   }
 }
 
@@ -150,11 +152,12 @@ void initCamera(){
   config.pin_reset = RESET_GPIO_NUM;
   config.xclk_freq_hz = 20000000;
   config.pixel_format = PIXFORMAT_JPEG;
+  config.grab_mode = CAMERA_GRAB_LATEST;
 
   if (psramFound()) {
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = 10;
-    config.fb_count = 2;
+    config.fb_count = 1;
   } else {
     config.frame_size = FRAMESIZE_SVGA;
     config.jpeg_quality = 12;
@@ -172,7 +175,7 @@ void setup() {
   // Serial port for debugging purposes
   Serial.begin(115200);
   initWiFi();
-  initSPIFFS();
+  initLittleFS();
   // Turn-off the 'brownout detector'
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   initCamera();
@@ -192,7 +195,7 @@ void setup() {
 
 void loop() {
   if (takeNewPhoto) {
-    capturePhotoSaveSpiffs();
+    capturePhotoSaveLittleFS();
     takeNewPhoto = false;
   }
   delay(1);
@@ -202,11 +205,40 @@ void loop() {
 
     //MIME type should be valid to avoid the download problem.
     //The file systems for flash and SD/SDMMC can be changed in FirebaseFS.h.
-    if (Firebase.Storage.upload(&fbdo, STORAGE_BUCKET_ID /* Firebase Storage bucket id */, FILE_PHOTO /* path to local file */, mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, FILE_PHOTO /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */)){
+    if (Firebase.Storage.upload(&fbdo, STORAGE_BUCKET_ID /* Firebase Storage bucket id */, FILE_PHOTO_PATH /* path to local file */, mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, BUCKET_PHOTO /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */,fcsUploadCallback)){
       Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
     }
     else{
       Serial.println(fbdo.errorReason());
     }
   }
+}
+
+// The Firebase Storage upload callback function
+void fcsUploadCallback(FCS_UploadStatusInfo info){
+    if (info.status == firebase_fcs_upload_status_init){
+        Serial.printf("Uploading file %s (%d) to %s\n", info.localFileName.c_str(), info.fileSize, info.remoteFileName.c_str());
+    }
+    else if (info.status == firebase_fcs_upload_status_upload)
+    {
+        Serial.printf("Uploaded %d%s, Elapsed time %d ms\n", (int)info.progress, "%", info.elapsedTime);
+    }
+    else if (info.status == firebase_fcs_upload_status_complete)
+    {
+        Serial.println("Upload completed\n");
+        FileMetaInfo meta = fbdo.metaData();
+        Serial.printf("Name: %s\n", meta.name.c_str());
+        Serial.printf("Bucket: %s\n", meta.bucket.c_str());
+        Serial.printf("contentType: %s\n", meta.contentType.c_str());
+        Serial.printf("Size: %d\n", meta.size);
+        Serial.printf("Generation: %lu\n", meta.generation);
+        Serial.printf("Metageneration: %lu\n", meta.metageneration);
+        Serial.printf("ETag: %s\n", meta.etag.c_str());
+        Serial.printf("CRC32: %s\n", meta.crc32.c_str());
+        Serial.printf("Tokens: %s\n", meta.downloadTokens.c_str());
+        Serial.printf("Download URL: %s\n\n", fbdo.downloadURL().c_str());
+    }
+    else if (info.status == firebase_fcs_upload_status_error){
+        Serial.printf("Upload failed, %s\n", info.errorMsg.c_str());
+    }
 }
