@@ -43,7 +43,7 @@ void setup(){
   Serial.begin(115200);
 
   // Connect to Wi-Fi
-  WiFi.begin(WIFI_AP, WIFI_PASSWORD);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   Serial.print("Connecting to Wi-Fi");
   while (WiFi.status() != WL_CONNECTED)    {
     Serial.print(".");
@@ -90,9 +90,6 @@ void loop(){
       Serial.println("Requested data from /test/int, /test/float, and /test/string");
     }
   }
-
-  // Process async results
-  processData(dbResult);
 }
 
 template <typename T>
@@ -111,16 +108,16 @@ void processData(AsyncResult &aResult){
   if (!aResult.isResult())
     return;
 
- if (aResult.isEvent())
+  if (aResult.isEvent())
     Firebase.printf("Event task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.eventLog().message().c_str(), aResult.eventLog().code());
 
- if (aResult.isDebug())
+  if (aResult.isDebug())
     Firebase.printf("Debug task: %s, msg: %s\n", aResult.uid().c_str(), aResult.debug().c_str());
 
- if (aResult.isError())
+  if (aResult.isError())
     Firebase.printf("Error task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.error().message().c_str(), aResult.error().code());
 
- if (aResult.available())    {
+  if (aResult.available()){
     // Log the task and payload
     Firebase.printf("task: %s, payload: %s\n", aResult.uid().c_str(), aResult.c_str());
   }
