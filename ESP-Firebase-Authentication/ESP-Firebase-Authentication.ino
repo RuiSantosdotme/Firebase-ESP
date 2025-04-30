@@ -1,95 +1,101 @@
 /*
-  Rui Santos
+  Rui Santos & Sara Santos - Random Nerd Tutorials
   Complete project details at our blog: https://RandomNerdTutorials.com/esp32-esp8266-firebase-authentication/
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-  Based in the Authenticatiions Examples by Firebase-ESP-Client library by mobizt: https://github.com/mobizt/Firebase-ESP-Client/tree/main/examples/Authentications
+  Based on this example: https://github.com/mobizt/FirebaseClient/blob/main/examples/App/AppInitialization/UserAuth/UserAuth.ino
 */
 
 #include <Arduino.h>
 #if defined(ESP32)
-  #include <WiFi.h>
+    #include <WiFi.h>
 #elif defined(ESP8266)
-  #include <ESP8266WiFi.h>
+    #include <ESP8266WiFi.h>
 #endif
-#include <Firebase_ESP_Client.h>
+#include <WiFiClientSecure.h>
+#include <FirebaseClient.h>
+#include "ExampleFunctions.h" // Provides the functions used in the examples.
 
-// Provide the token generation process info.
-#include "addons/TokenHelper.h"
-// Provide the RTDB payload printing info and other helper functions.
-#include "addons/RTDBHelper.h"
-
-// Insert your network credentials
+// Network and Firebase credentials
 #define WIFI_SSID "REPLACE_WITH_YOUR_SSID"
 #define WIFI_PASSWORD "REPLACE_WITH_YOUR_PASSWORD"
 
-// Insert Firebase project API Key
-#define API_KEY "REPLACE_WITH_YOUR_FIREBASE_PROJECT_API_KEY"
+#define Web_API_KEY "REPLACE_WITH_YOUR_FIREBASE_PROJECT_API_KEY"
 
-// Insert Authorized Email and Corresponding Password
-#define USER_EMAIL "email@example.com"
-#define USER_PASSWORD "your_user_password"
+#define USER_EMAIL "REPLACE_WITH_FIREBASE_PROJECT_EMAIL_USER"
+#define USER_PASS "REPLACE_WITH_FIREBASE_PROJECT_USER_PASS"
 
-// Define Firebase objects
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
+// User functions
+void processData(AsyncResult &aResult);
 
-// Variable to save USER UID
-String uid;
+// Authentication
+UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
 
-// Initialize WiFi
-void initWiFi() {
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  Serial.print("Connecting to WiFi ..");
-  while (WiFi.status() != WL_CONNECTED) {
-    Serial.print('.');
-    delay(1000);
-  }
-  Serial.println(WiFi.localIP());
-  Serial.println();
-}
+// Firebase components
+FirebaseApp app;
+WiFiClientSecure ssl_client;
+using AsyncClient = AsyncClientClass;
+AsyncClient aClient(ssl_client);
+AsyncResult dbResult;
+
+bool taskComplete = false;
 
 void setup(){
   Serial.begin(115200);
-  
-  // Initialize WiFi
-  initWiFi();
 
-  // Assign the api key (required)
-  config.api_key = API_KEY;
-
-  // Assign the user sign in credentials
-  auth.user.email = USER_EMAIL;
-  auth.user.password = USER_PASSWORD;
-
-  Firebase.reconnectWiFi(true);
-  fbdo.setResponseSize(4096);
-
-  // Assign the callback function for the long running token generation task
-  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
-
-  // Assign the maximum retry of token generation
-  config.max_token_generation_retry = 5;
-
-  // Initialize the library with the Firebase authen and config
-  Firebase.begin(&config, &auth);
-
-  // Getting the user UID might take a few seconds
-  Serial.println("Getting User UID");
-  while ((auth.token.uid) == "") {
-    Serial.print('.');
-    delay(1000);
+  // Connect to Wi-Fi
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  Serial.print("Connecting to Wi-Fi");
+  while (WiFi.status() != WL_CONNECTED)    {
+    Serial.print(".");
+    delay(300);
   }
-  // Print user UID
-  uid = auth.token.uid.c_str();
-  Serial.print("User UID: ");
-  Serial.print(uid);
+  Serial.println();
+  Serial.print("Connected with IP: ");
+  Serial.println(WiFi.localIP());
+  Serial.println();
+
+  // Configure SSL client
+  ssl_client.setInsecure();
+  #if defined(ESP32)
+    ssl_client.setConnectionTimeout(1000);
+    ssl_client.setHandshakeTimeout(5);
+  #elif defined(ESP8266)
+    ssl_client.setTimeout(1000); // Set connection timeout
+    ssl_client.setBufferSizes(4096, 1024); // Set buffer sizes
+  #endif
+
+  // Initialize Firebase
+  initializeApp(aClient, app, getAuth(user_auth), processData, "🔐 authTask");
 }
 
 void loop(){
-  if (Firebase.isTokenExpired()){
-    Firebase.refreshToken(&config);
-    Serial.println("Refresh token");
+  // Maintain authentication and async tasks
+  app.loop();
+
+  // Check if authentication is ready
+  if (app.ready() && !taskComplete){
+    taskComplete = true;
+    // Print authentication info
+    Serial.println("Authentication Information");
+    Firebase.printf("User UID: %s\n", app.getUid().c_str());
+    Firebase.printf("Auth Token: %s\n", app.getToken().c_str());
+    Firebase.printf("Refresh Token: %s\n", app.getRefreshToken().c_str());
+    print_token_type(app);
   }
+}
+
+void processData(AsyncResult &aResult){
+  if (!aResult.isResult())
+    return;
+
+  if (aResult.isEvent())
+    Firebase.printf("Event task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.eventLog().message().c_str(), aResult.eventLog().code());
+
+  if (aResult.isDebug())
+    Firebase.printf("Debug task: %s, msg: %s\n", aResult.uid().c_str(), aResult.debug().c_str());
+
+  if (aResult.isError())
+    Firebase.printf("Error task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.error().message().c_str(), aResult.error().code());
+
+  if (aResult.available())
+    Firebase.printf("task: %s, payload: %s\n", aResult.uid().c_str(), aResult.c_str());
 }
