@@ -1,5 +1,5 @@
 /*
-  Rui Santos
+  Rui Santos & Sara Santos - Random Nerd Tutorials
   Complete project details at our blog: https://RandomNerdTutorials.com/esp8266-data-logging-firebase-realtime-database/
   Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
   The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
@@ -7,36 +7,38 @@
 
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
-#include <Firebase_ESP_Client.h>
+#include <WiFiClientSecure.h>
+#include <FirebaseClient.h>
 #include <Wire.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BME280.h>
-#include <NTPClient.h>
-#include <WiFiUdp.h>
+#include "time.h"
 
-// Provide the token generation process info.
-#include "addons/TokenHelper.h"
-// Provide the RTDB payload printing info and other helper functions.
-#include "addons/RTDBHelper.h"
-
-// Insert your network credentials
+// Network and Firebase credentials
 #define WIFI_SSID "REPLACE_WITH_YOUR_SSID"
 #define WIFI_PASSWORD "REPLACE_WITH_YOUR_PASSWORD"
 
-// Insert Firebase project API Key
-#define API_KEY "REPLACE_WITH_YOUR_PROJECT_API_KEY"
+#define Web_API_KEY "REPLACE_WITH_YOUR_FIREBASE_PROJECT_API_KEY"
+#define DATABASE_URL "REPLACE_WITH_YOUR_FIREBASE_DATABASE_URL"
+#define USER_EMAIL "REPLACE_WITH_FIREBASE_PROJECT_EMAIL_USER"
+#define USER_PASS "REPLACE_WITH_FIREBASE_PROJECT_USER_PASS"
 
-// Insert Authorized Email and Corresponding Password
-#define USER_EMAIL "REPLACE_WITH_THE_USER_EMAIL"
-#define USER_PASSWORD "REPLACE_WITH_THE_USER_PASSWORD"
+// User functions
+void processData(AsyncResult &aResult);
 
-// Insert RTDB URLefine the RTDB URL
-#define DATABASE_URL "REPLACE_WITH_YOUR_DATABASE_URL"
+// Authentication
+UserAuth user_auth(Web_API_KEY, USER_EMAIL, USER_PASS);
 
-// Define Firebase objects
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig config;
+// Firebase components
+FirebaseApp app;
+WiFiClientSecure ssl_client;
+using AsyncClient = AsyncClientClass;
+AsyncClient aClient(ssl_client);
+RealtimeDatabase Database;
+
+// Timer variables for sending data every 10 seconds
+unsigned long lastSendTime = 0;
+const unsigned long sendInterval = 10000; // 10 seconds in milliseconds
 
 // Variable to save USER UID
 String uid;
@@ -52,14 +54,9 @@ String timePath = "/timestamp";
 // Parent Node (to be updated in every loop)
 String parentPath;
 
-FirebaseJson json;
-
-// Define NTP Client to get time
-WiFiUDP ntpUDP;
-NTPClient timeClient(ntpUDP, "pool.ntp.org");
-
-// Variable to save current epoch time
 int timestamp;
+
+const char* ntpServer = "pool.ntp.org";
 
 // BME280 sensor
 Adafruit_BME280 bme; // I2C
@@ -67,9 +64,9 @@ float temperature;
 float humidity;
 float pressure;
 
-// Timer variables (send new readings every three minutes)
-unsigned long sendDataPrevMillis = 0;
-unsigned long timerDelay = 180000;
+// Create JSON objects for storing data
+object_t jsonData, obj1, obj2, obj3, obj4;
+JsonWriter writer;
 
 // Initialize BME280
 void initBME(){
@@ -87,79 +84,93 @@ void initWiFi() {
     Serial.print('.');
     delay(1000);
   }
-  Serial.println(WiFi.localIP());
-  Serial.println();
 }
 
 // Function that gets current epoch time
 unsigned long getTime() {
-  timeClient.update();
-  unsigned long now = timeClient.getEpochTime();
+  time_t now;
+  struct tm timeinfo;
+  if (!getLocalTime(&timeinfo)) {
+    //Serial.println("Failed to obtain time");
+    return(0);
+  }
+  time(&now);
   return now;
 }
 
 void setup(){
   Serial.begin(115200);
 
-  // Initialize BME280 sensor
   initBME();
   initWiFi();
-  timeClient.begin();
+  configTime(0, 0, ntpServer);
 
-  // Assign the api key (required)
-  config.api_key = API_KEY;
+  // Configure SSL client
+  ssl_client.setInsecure();
+  ssl_client.setTimeout(1000); // Set connection timeout
+  ssl_client.setBufferSizes(4096, 1024); // Set buffer sizes
 
-  // Assign the user sign in credentials
-  auth.user.email = USER_EMAIL;
-  auth.user.password = USER_PASSWORD;
-
-  // Assign the RTDB URL (required)
-  config.database_url = DATABASE_URL;
-
-  Firebase.reconnectWiFi(true);
-  fbdo.setResponseSize(4096);
-
-  // Assign the callback function for the long running token generation task */
-  config.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
-
-  // Assign the maximum retry of token generation
-  config.max_token_generation_retry = 5;
-
-  // Initialize the library with the Firebase authen and config
-  Firebase.begin(&config, &auth);
-
-  // Getting the user UID might take a few seconds
-  Serial.println("Getting User UID");
-  while ((auth.token.uid) == "") {
-    Serial.print('.');
-    delay(1000);
-  }
-  // Print user UID
-  uid = auth.token.uid.c_str();
-  Serial.print("User UID: ");
-  Serial.println(uid);
-
-  // Update database path
-  databasePath = "/UsersData/" + uid + "/readings";
+  // Initialize Firebase
+  initializeApp(aClient, app, getAuth(user_auth), processData, "🔐 authTask");
+  app.getApp<RealtimeDatabase>(Database);
+  Database.url(DATABASE_URL);
 }
 
 void loop(){
+  // Maintain authentication and async tasks
+  app.loop();
 
-  // Send new readings to database
-  if (Firebase.ready() && (millis() - sendDataPrevMillis > timerDelay || sendDataPrevMillis == 0)){
-    sendDataPrevMillis = millis();
+  // Check if authentication is ready
+  if (app.ready()){
 
-    //Get current timestamp
-    timestamp = getTime();
-    Serial.print ("time: ");
-    Serial.println (timestamp);
+    // Periodic data sending every 10 seconds
+    unsigned long currentTime = millis();
+    if (currentTime - lastSendTime >= sendInterval){
+      // Update the last send time
+      lastSendTime = currentTime;
 
-    parentPath= databasePath + "/" + String(timestamp);
+      uid = app.getUid().c_str();
 
-    json.set(tempPath.c_str(), String(bme.readTemperature()));
-    json.set(humPath.c_str(), String(bme.readHumidity()));
-    json.set(presPath.c_str(), String(bme.readPressure()/100.0F));
-    json.set(timePath, String(timestamp));
-    Serial.printf("Set json... %s\n", Firebase.RTDB.setJSON(&fbdo, parentPath.c_str(), &json) ? "ok" : fbdo.errorReason().c_str());
+      // Update database path
+      databasePath = "/UsersData/" + uid ;
+
+      //Get current timestamp
+      timestamp = getTime();
+      Serial.print ("time: ");
+      Serial.println (timestamp);
+
+      parentPath= databasePath + "/" + String(timestamp);
+
+      // Get sensor readings
+      temperature = bme.readTemperature();
+      humidity = bme.readHumidity();
+      pressure = bme.readPressure()/100.0;
+
+      // Create a JSON object with the data
+      writer.create(obj1, tempPath, temperature);
+      writer.create(obj2, humPath, humidity);
+      writer.create(obj3, presPath, pressure);
+      writer.create(obj4, timePath, timestamp);
+      writer.join(jsonData, 4, obj1, obj2, obj3, obj4);
+
+      Database.set<object_t>(aClient, parentPath, jsonData, processData, "RTDB_Send_Data");
+    }
   }
+}
+
+void processData(AsyncResult &aResult){
+  if (!aResult.isResult())
+    return;
+
+  if (aResult.isEvent())
+    Firebase.printf("Event task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.eventLog().message().c_str(), aResult.eventLog().code());
+
+  if (aResult.isDebug())
+    Firebase.printf("Debug task: %s, msg: %s\n", aResult.uid().c_str(), aResult.debug().c_str());
+
+  if (aResult.isError())
+    Firebase.printf("Error task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.error().message().c_str(), aResult.error().code());
+
+  if (aResult.available())
+    Firebase.printf("task: %s, payload: %s\n", aResult.uid().c_str(), aResult.c_str());
 }
