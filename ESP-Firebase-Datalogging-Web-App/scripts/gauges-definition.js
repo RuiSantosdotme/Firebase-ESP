@@ -1,6 +1,5 @@
-// Create Temperature Gauge
-function createTemperatureGauge() {
-    var gauge = new LinearGauge({
+export function createTemperatureGauge() {
+    return new LinearGauge({
         renderTo: 'gauge-temperature',
         width: 120,
         height: 400,
@@ -48,12 +47,10 @@ function createTemperatureGauge() {
         animationRule: "linear",
         barWidth: 10,
     });
-    return gauge;
 }
 
-// Create Humidity Gauge
-function createHumidityGauge(){
-    var gauge = new RadialGauge({
+export function createHumidityGauge() {
+    return new RadialGauge({
         renderTo: 'gauge-humidity',
         width: 300,
         height: 300,
@@ -71,7 +68,6 @@ function createHumidityGauge(){
             "60",
             "80",
             "100"
-    
         ],
         minorTicks: 4,
         strokeTicks: true,
@@ -96,5 +92,4 @@ function createHumidityGauge(){
         animationDuration: 1500,
         animationRule: "linear"
     });
-    return gauge;
 }
