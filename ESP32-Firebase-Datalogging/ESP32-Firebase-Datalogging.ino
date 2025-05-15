@@ -132,7 +132,7 @@ void loop(){
       uid = app.getUid().c_str();
 
       // Update database path
-      databasePath = "/UsersData/" + uid ;
+      databasePath = "/UsersData/" + uid + "/readings";
 
       //Get current timestamp
       timestamp = getTime();
