@@ -1,127 +1,80 @@
-// Create the charts when the web page loads
-window.addEventListener('load', onload);
-
-function onload(event){
-  chartT = createTemperatureChart();
-  chartH = createHumidityChart();
-  chartP = createPressureChart();
-}
-
-// Create Temperature Chart
-function createTemperatureChart() {
-  var chart = new Highcharts.Chart({
-    chart:{ 
-      renderTo:'chart-temperature',
-      type: 'spline' 
+export function createTemperatureChart() {
+  return Highcharts.chart('chart-temperature', {
+    chart: {
+      type: 'line',
+      zoomType: 'x'
     },
-    series: [
-      {
-        name: 'BME280'
-      }
-    ],
-    title: { 
-      text: undefined
-    },
-    plotOptions: {
-      line: { 
-        animation: false,
-        dataLabels: { 
-          enabled: true 
-        }
-      }
+    title: {
+      text: 'Temperature'
     },
     xAxis: {
       type: 'datetime',
-      dateTimeLabelFormats: { second: '%H:%M:%S' }
-    },
-    yAxis: {
-      title: { 
-        text: 'Temperature Celsius Degrees' 
+      title: {
+        text: 'Time'
       }
     },
-    credits: { 
-      enabled: false 
-    }
-  });
-  return chart;
-}
-
-// Create Humidity Chart
-function createHumidityChart(){
-  var chart = new Highcharts.Chart({
-    chart:{ 
-      renderTo:'chart-humidity',
-      type: 'spline'  
+    yAxis: {
+      title: {
+        text: 'Temperature (°C)'
+      }
     },
     series: [{
-      name: 'BME280'
-    }],
-    title: { 
-      text: undefined
-    },    
-    plotOptions: {
-      line: { 
-        animation: false,
-        dataLabels: { 
-          enabled: true 
-        }
-      },
-      series: { 
-        color: '#50b8b4' 
-      }
-    },
-    xAxis: {
-      type: 'datetime',
-      dateTimeLabelFormats: { second: '%H:%M:%S' }
-    },
-    yAxis: {
-      title: { 
-        text: 'Humidity (%)' 
-      }
-    },
-    credits: { 
-      enabled: false 
-    }
+      name: 'Temperature',
+      data: []
+    }]
   });
-  return chart;
 }
 
-// Create Pressure Chart
-function createPressureChart() {
-  var chart = new Highcharts.Chart({
-    chart:{ 
-      renderTo:'chart-pressure',
-      type: 'spline'  
+export function createHumidityChart() {
+  return Highcharts.chart('chart-humidity', {
+    chart: {
+      type: 'line',
+      zoomType: 'x'
     },
-    series: [{
-      name: 'BME280'
-    }],
-    title: { 
-      text: undefined
-    },    
-    plotOptions: {
-      line: { 
-        animation: false,
-        dataLabels: { 
-          enabled: true 
-        }
-      },
-      series: { 
-        color: '#A62639' 
-      }
+    title: {
+      text: 'Humidity'
     },
     xAxis: {
       type: 'datetime',
-      dateTimeLabelFormats: { second: '%H:%M:%S' }
-    },
-    yAxis: {
-      title: { 
-        text: 'Pressure (hPa)' 
+      title: {
+        text: 'Time'
       }
     },
-    credits: { 
-      enabled: false 
-    }
+    yAxis: {
+      title: {
+        text: 'Humidity (%)'
+      }
+    },
+    series: [{
+      name: 'Humidity',
+      data: []
+    }]
   });
-  return chart;
+}
+
+export function createPressureChart() {
+  return Highcharts.chart('chart-pressure', {
+    chart: {
+      type: 'line',
+      zoomType: 'x'
+    },
+    title: {
+      text: 'Pressure'
+    },
+    xAxis: {
+      type: 'datetime',
+      title: {
+        text: 'Time'
+      }
+    },
+    yAxis: {
+      title: {
+        text: 'Pressure (hPa)'
+      }
+    },
+    series: [{
+      name: 'Pressure',
+      data: []
+    }]
+  });
 }
