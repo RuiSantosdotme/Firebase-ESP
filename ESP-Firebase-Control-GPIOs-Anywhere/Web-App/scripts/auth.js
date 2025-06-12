@@ -1,43 +1,43 @@
-document.addEventListener("DOMContentLoaded", function(){
+import { auth, setupUI } from "./index.js";
+import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.0/firebase-auth.js";
 
-    // listen for auth status changes
-    auth.onAuthStateChanged(user => {
-        if (user) {
-            console.log("user logged in");
-            console.log(user);
-            setupUI(user);
-        } else {
-            console.log("user logged out");
-            setupUI();
-        }
-    });
+document.addEventListener("DOMContentLoaded", () => {
+  // Listen for auth status changes
+  onAuthStateChanged(auth, (user) => {
+    if (user) {
+      console.log("User logged in:", user.email);
+      setupUI(user);
+    } else {
+      console.log("User logged out");
+      setupUI(null);
+    }
+  });
 
-    // login
-    const loginForm = document.querySelector('#login-form');
-    loginForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        // get user info
-        const email = loginForm['input-email'].value;
-        const password = loginForm['input-password'].value;
-        // log the user in
-        auth.signInWithEmailAndPassword(email, password).then((cred) => {
-            // close the login modal & reset form
-            loginForm.reset();
-            console.log(email);
-        })
-        .catch((error) =>{
-            const errorCode = error.code;
-            const errorMessage = error.message;
-            document.getElementById("error-message").innerHTML = errorMessage;
-            console.log(errorMessage);
-        });
-    });
-
-    // logout
-    const logout = document.querySelector('#logout-link');
-    logout.addEventListener('click', (e) => {
+  // Login
+  const loginForm = document.querySelector('#login-form');
+  loginForm.addEventListener('submit', async (e) => {
     e.preventDefault();
-    auth.signOut();
-    });
-    
+    const email = loginForm['input-email'].value;
+    const password = loginForm['input-password'].value;
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      loginForm.reset();
+      console.log("Logged in:", email);
+    } catch (error) {
+      document.getElementById("error-message").textContent = error.message;
+      console.error("Login error:", error.message);
+    }
+  });
+
+  // Logout
+  const logoutLink = document.querySelector('#logout-link');
+  logoutLink.addEventListener('click', async (e) => {
+    e.preventDefault();
+    try {
+      await signOut(auth);
+      console.log("User signed out");
+    } catch (error) {
+      console.error("Logout error:", error.message);
+    }
+  });
 });
