@@ -4,9 +4,11 @@
   Based on this example: https://github.com/mobizt/FirebaseClient/blob/main/examples/App/AppInitialization/UserAuth/UserAuth.ino
 */
 
+#define ENABLE_USER_AUTH
+
 #include <Arduino.h>
 #if defined(ESP32)
-  include <WiFi.h>
+  #include <WiFi.h>
 #elif defined(ESP8266)
   #include <ESP8266WiFi.h>
 #endif
