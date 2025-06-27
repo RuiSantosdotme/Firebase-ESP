@@ -3,7 +3,6 @@
   Complete project details at our blog: https://RandomNerdTutorials.com/esp32-esp8266-firebase-authentication/
   Based on this example: https://github.com/mobizt/FirebaseClient/blob/main/examples/App/AppInitialization/UserAuth/UserAuth.ino
 */
-
 #define ENABLE_USER_AUTH
 
 #include <Arduino.h>
