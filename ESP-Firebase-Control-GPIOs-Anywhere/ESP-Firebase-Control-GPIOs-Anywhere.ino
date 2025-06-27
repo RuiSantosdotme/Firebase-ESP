@@ -8,6 +8,8 @@
   Based in the RTDB Basic Example by Firebase-ESP-Client library by mobizt
   https://github.com/mobizt/Firebase-ESP-Client/blob/main/examples/RTDB/Basic/Basic.ino
 */
+#define ENABLE_USER_AUTH
+#define ENABLE_DATABASE
 
 #include <Arduino.h>
 #if defined(ESP32)
