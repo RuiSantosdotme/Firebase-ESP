@@ -2,7 +2,6 @@
   Rui Santos & Sara Santos - Random Nerd Tutorials
   Complete instructions at https://RandomNerdTutorials.com/esp32-firebase-realtime-database/
 *********/
-
 #define ENABLE_USER_AUTH
 #define ENABLE_DATABASE
 
