@@ -3,6 +3,9 @@
   Complete instructions at https://RandomNerdTutorials.com/esp8266-nodemcu-firebase-realtime-database/
 *********/
 
+#define ENABLE_USER_AUTH
+#define ENABLE_DATABASE
+
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <WiFiClientSecure.h>
