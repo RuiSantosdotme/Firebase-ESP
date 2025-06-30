@@ -1,44 +1,56 @@
 /*********
-  Rui Santos
+  Rui Santos & Sara Santos - Random Nerd Tutorials
   Complete instructions at: https://RandomNerdTutorials.com/esp32-cam-save-picture-firebase-storage/
-  
-  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files.
-  The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
-
+  Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files. The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
   Based on the example provided by the ESP Firebase Client Library
 *********/
+#define ENABLE_USER_AUTH
+#define ENABLE_STORAGE
+#define ENABLE_FS
 
-#include "Arduino.h"
-#include "WiFi.h"
-#include "esp_camera.h"
-#include "soc/soc.h"           // Disable brownout problems
-#include "soc/rtc_cntl_reg.h"  // Disable brownout problems
-#include "driver/rtc_io.h"
-#include <LittleFS.h>
+#include <Arduino.h>
+#include <FirebaseClient.h>
 #include <FS.h>
-#include <Firebase_ESP_Client.h>
-//Provide the token generation process info.
-#include <addons/TokenHelper.h>
+#include <LittleFS.h>
+#include <WiFi.h>
+#include <WiFiClientSecure.h>
+#include "esp_camera.h"
 
-//Replace with your network credentials
-const char* ssid = "REPLACE_WITH_YOUR_SSID";
-const char* password = "REPLACE_WITH_YOUR_PASSWORD";
+#define WIFI_SSID "REPLACE_WITH_YOUR_SSID"
+#define WIFI_PASSWORD "REPLACE_WITH_YOUR_PASSWORD"
 
-// Insert Firebase project API Key
 #define API_KEY "REPLACE_WITH_YOUR_FIREBASE_PROJECT_API_KEY"
+#define USER_EMAIL "REPLACE_WITH_FIREBASE_PROJECT_EMAIL_USER"
+#define USER_PASSWORD "REPLACE_WITH_FIREBASE_PROJECT_USER_PASS"
 
-// Insert Authorized Email and Corresponding Password
-#define USER_EMAIL "REPLACE_WITH_THE_AUTHORIZED_USER_EMAIL"
-#define USER_PASSWORD "REPLACE_WITH_THE_AUTHORIZED_USER_PASSWORD"
+// Define the Firebase storage bucket ID e.g bucket-name.appspot.com */
+#define STORAGE_BUCKET_ID "REPLACE_WITH_STORAGE_BUCKET_ID"
 
-// Insert Firebase storage bucket ID e.g bucket-name.appspot.com
-#define STORAGE_BUCKET_ID "REPLACE_WITH_YOUR_STORAGE_BUCKET_ID"
-// For example:
-//#define STORAGE_BUCKET_ID "esp-iot-app.appspot.com"
-
-// Photo File Name to save in LittleFS
+// Photo path in filesystem and photo path in Firebase bucket
 #define FILE_PHOTO_PATH "/photo.jpg"
-#define BUCKET_PHOTO "/data/photo.jpg"
+#define BUCKET_PHOTO_PATH "/data/photo.jpg"
+
+// User functions
+void processData(AsyncResult &aResult);
+void file_operation_callback(File &file, const char *filename, file_operating_mode mode);
+
+FileConfig media_file(FILE_PHOTO_PATH, file_operation_callback); // Can be set later with media_file.setFile("/image.png", file_operation_callback);
+
+File myFile;
+
+// Authentication
+UserAuth user_auth(API_KEY, USER_EMAIL, USER_PASSWORD, 3000 /* expire period in seconds (<3600) */);
+
+// Firebase components
+FirebaseApp app;
+WiFiClientSecure ssl_client;
+using AsyncClient = AsyncClientClass;
+AsyncClient aClient(ssl_client);
+Storage storage;
+
+bool taskComplete = false;
+
+AsyncResult storageResult;
 
 // OV2640 camera module pins (CAMERA_MODEL_AI_THINKER)
 #define PWDN_GPIO_NUM     32
@@ -60,21 +72,12 @@ const char* password = "REPLACE_WITH_YOUR_PASSWORD";
 
 boolean takeNewPhoto = true;
 
-//Define Firebase Data objects
-FirebaseData fbdo;
-FirebaseAuth auth;
-FirebaseConfig configF;
-
-void fcsUploadCallback(FCS_UploadStatusInfo info);
-
-bool taskCompleted = false;
-
 // Capture Photo and Save it to LittleFS
 void capturePhotoSaveLittleFS( void ) {
   // Dispose first pictures because of bad quality
   camera_fb_t* fb = NULL;
   // Skip first 3 frames (increase/decrease number as needed).
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < 10; i++) {
     fb = esp_camera_fb_get();
     esp_camera_fb_return(fb);
     fb = NULL;
@@ -108,14 +111,7 @@ void capturePhotoSaveLittleFS( void ) {
   // Close the file
   file.close();
   esp_camera_fb_return(fb);
-}
-
-void initWiFi(){
-  WiFi.begin(ssid, password);
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(1000);
-    Serial.println("Connecting to WiFi...");
-  }
+  delay(100);
 }
 
 void initLittleFS(){
@@ -126,6 +122,14 @@ void initLittleFS(){
   else {
     delay(500);
     Serial.println("LittleFS mounted successfully");
+  }
+}
+
+void initWiFi(){
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
+  while (WiFi.status() != WL_CONNECTED) {
+    delay(1000);
+    Serial.println("Connecting to WiFi...");
   }
 }
 
@@ -168,77 +172,117 @@ void initCamera(){
   if (err != ESP_OK) {
     Serial.printf("Camera init failed with error 0x%x", err);
     ESP.restart();
-  } 
-}
-
-void setup() {
-  // Serial port for debugging purposes
-  Serial.begin(115200);
-  initWiFi();
-  initLittleFS();
-  // Turn-off the 'brownout detector'
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-  initCamera();
-
-  //Firebase
-  // Assign the api key
-  configF.api_key = API_KEY;
-  //Assign the user sign in credentials
-  auth.user.email = USER_EMAIL;
-  auth.user.password = USER_PASSWORD;
-  //Assign the callback function for the long running token generation task
-  configF.token_status_callback = tokenStatusCallback; //see addons/TokenHelper.h
-
-  Firebase.begin(&configF, &auth);
-  Firebase.reconnectWiFi(true);
-}
-
-void loop() {
-  if (takeNewPhoto) {
-    capturePhotoSaveLittleFS();
-    takeNewPhoto = false;
   }
-  delay(1);
-  if (Firebase.ready() && !taskCompleted){
-    taskCompleted = true;
-    Serial.print("Uploading picture... ");
-
-    //MIME type should be valid to avoid the download problem.
-    //The file systems for flash and SD/SDMMC can be changed in FirebaseFS.h.
-    if (Firebase.Storage.upload(&fbdo, STORAGE_BUCKET_ID /* Firebase Storage bucket id */, FILE_PHOTO_PATH /* path to local file */, mem_storage_type_flash /* memory storage type, mem_storage_type_flash and mem_storage_type_sd */, BUCKET_PHOTO /* path of remote file stored in the bucket */, "image/jpeg" /* mime type */,fcsUploadCallback)){
-      Serial.printf("\nDownload URL: %s\n", fbdo.downloadURL().c_str());
-    }
-    else{
-      Serial.println(fbdo.errorReason());
-    }
-  }
+  Serial.print("Camera init success");
 }
 
-// The Firebase Storage upload callback function
-void fcsUploadCallback(FCS_UploadStatusInfo info){
-    if (info.status == firebase_fcs_upload_status_init){
-        Serial.printf("Uploading file %s (%d) to %s\n", info.localFileName.c_str(), info.fileSize, info.remoteFileName.c_str());
+void setup(){
+    Serial.begin(115200);
+    initWiFi();
+    initCamera();
+
+    Firebase.printf("Firebase Client v%s\n", FIREBASE_CLIENT_VERSION);
+
+    initLittleFS();
+
+    // Configure SSL client
+    ssl_client.setInsecure();
+    ssl_client.setConnectionTimeout(1000);
+    ssl_client.setHandshakeTimeout(5);
+    Serial.println("Initializing app...");
+    initializeApp(aClient, app, getAuth(user_auth), processData, "🔐 authTask");
+
+    app.getApp<Storage>(storage);
+
+    Serial.println("Listing files in LittleFS:");
+    File root = LittleFS.open("/");
+    File file = root.openNextFile();
+    while (file) {
+        Serial.println(file.name());
+        file = root.openNextFile();
     }
-    else if (info.status == firebase_fcs_upload_status_upload)
+
+}
+
+void loop(){
+    // To maintain the authentication process.
+    app.loop();
+
+    if (app.ready() && !taskComplete && takeNewPhoto){
+        taskComplete = true;
+        takeNewPhoto = false;
+
+        capturePhotoSaveLittleFS();
+        
+        // Async call with callback function.
+        storage.upload(aClient, FirebaseStorage::Parent(STORAGE_BUCKET_ID, BUCKET_PHOTO_PATH), getFile(media_file), "image/jpg", processData, "⬆️  uploadTask");
+    }
+}
+
+void processData(AsyncResult &aResult)
+{
+    // Exits when no result available when calling from the loop.
+    if (!aResult.isResult())
+        return;
+
+    if (aResult.isEvent())
     {
-        Serial.printf("Uploaded %d%s, Elapsed time %d ms\n", (int)info.progress, "%", info.elapsedTime);
+        Firebase.printf("Event task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.appEvent().message().c_str(), aResult.appEvent().code());
     }
-    else if (info.status == firebase_fcs_upload_status_complete)
+
+    if (aResult.isDebug())
     {
-        Serial.println("Upload completed\n");
-        FileMetaInfo meta = fbdo.metaData();
-        Serial.printf("Name: %s\n", meta.name.c_str());
-        Serial.printf("Bucket: %s\n", meta.bucket.c_str());
-        Serial.printf("contentType: %s\n", meta.contentType.c_str());
-        Serial.printf("Size: %d\n", meta.size);
-        Serial.printf("Generation: %lu\n", meta.generation);
-        Serial.printf("Metageneration: %lu\n", meta.metageneration);
-        Serial.printf("ETag: %s\n", meta.etag.c_str());
-        Serial.printf("CRC32: %s\n", meta.crc32.c_str());
-        Serial.printf("Tokens: %s\n", meta.downloadTokens.c_str());
-        Serial.printf("Download URL: %s\n\n", fbdo.downloadURL().c_str());
+        Firebase.printf("Debug task: %s, msg: %s\n", aResult.uid().c_str(), aResult.debug().c_str());
     }
-    else if (info.status == firebase_fcs_upload_status_error){
-        Serial.printf("Upload failed, %s\n", info.errorMsg.c_str());
+
+    if (aResult.isError())
+    {
+        Firebase.printf("Error task: %s, msg: %s, code: %d\n", aResult.uid().c_str(), aResult.error().message().c_str(), aResult.error().code());
     }
+
+    if (aResult.downloadProgress())
+    {
+        Firebase.printf("Downloaded, task: %s, %d%s (%d of %d)\n", aResult.uid().c_str(), aResult.downloadInfo().progress, "%", aResult.downloadInfo().downloaded, aResult.downloadInfo().total);
+        if (aResult.downloadInfo().total == aResult.downloadInfo().downloaded)
+        {
+            Firebase.printf("Download task: %s, complete!✅️\n", aResult.uid().c_str());
+        }
+    }
+
+    if (aResult.uploadProgress())
+    {
+        Firebase.printf("Uploaded, task: %s, %d%s (%d of %d)\n", aResult.uid().c_str(), aResult.uploadInfo().progress, "%", aResult.uploadInfo().uploaded, aResult.uploadInfo().total);
+        if (aResult.uploadInfo().total == aResult.uploadInfo().uploaded)
+        {
+            Firebase.printf("Upload task: %s, complete!✅️\n", aResult.uid().c_str());
+            Serial.print("Download URL: ");
+            Serial.println(aResult.uploadInfo().downloadUrl);
+        }
+    }
+}
+
+void file_operation_callback(File &file, const char *filename, file_operating_mode mode){
+    // FILE_OPEN_MODE_READ, FILE_OPEN_MODE_WRITE and FILE_OPEN_MODE_APPEND are defined in this library
+    // MY_FS is defined in this example
+    switch (mode)    {
+    case file_mode_open_read:
+        myFile = LittleFS.open(filename, "r");
+        if (!myFile || !myFile.available()) {
+            Serial.println("[ERROR] Failed to open file for reading");
+        }
+        break;
+    case file_mode_open_write:
+        myFile = LittleFS.open(filename, "w");
+        break;
+    case file_mode_open_append:
+        myFile = LittleFS.open(filename, "a");
+        break;
+    case file_mode_remove:
+        LittleFS.remove(filename);
+        break;
+    default:
+        break;
+    }
+    // Set the internal FS object with global File object.
+    file = myFile;
 }
