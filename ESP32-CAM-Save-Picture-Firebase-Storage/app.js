@@ -1,27 +1,64 @@
-// Reference to Picture Storage Path
-var imgRef = storageRef.child('data/photo.jpg');
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-app.js';
+import { getAuth, signInWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js';
+import { getStorage, ref, getDownloadURL, getMetadata } from 'https://www.gstatic.com/firebasejs/10.14.1/firebase-storage.js';
 
-firebase.auth().signInAnonymously().then(function() {
+// Firebase configuration
+const firebaseConfig = {
+  apiKey: "REPLACE_WITH_YOUR_Firebase_CONFIGURATION",
+  authDomain: "REPLACE_WITH_YOUR_Firebase_CONFIGURATION",
+  databaseURL: "REPLACE_WITH_YOUR_Firebase_CONFIGURATION",
+  projectId: "REPLACE_WITH_YOUR_Firebase_CONFIGURATION",
+  storageBucket: "REPLACE_WITH_YOUR_Firebase_CONFIGURATION",
+  messagingSenderId: "REPLACE_WITH_YOUR_Firebase_CONFIGURATION",
+  appId: "REPLACE_WITH_YOUR_Firebase_CONFIGURATION"
+};
 
-  imgRef.getDownloadURL().then(function(url){
-    // `url` is the download URL for 'data/photo.jpg'
-    document.querySelector('img').src = url;
-    
-  }).catch(function(error) {
-    console.error(error);
+const email = 'AUTHORIZED_USER_EMAIL'; // Replace with your user email
+const password = 'PASSWORD'; // Replace with your user password
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const storage = getStorage(app);
+
+// Format date and time
+const formatDateTime = (date) => {
+  const pad = (num) => String(num).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())} at ${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+};
+
+// Authenticate user
+const authenticate = async () => {
+  try {
+    const userCredential = await signInWithEmailAndPassword(auth, email, password);
+    return userCredential.user;
+  } catch (error) {
+    document.getElementById('date-time').textContent = `Authentication error: ${error.message}`;
+    throw error;
+  }
+};
+
+// Load image and metadata
+const loadImageData = async (user) => {
+  try {
+    const storageRef = ref(storage, 'data/photo.jp');
+    const url = await getDownloadURL(storageRef);
+    document.querySelector('#img').src = url;
+
+    const metadata = await getMetadata(storageRef);
+    document.getElementById('date-time').textContent = formatDateTime(new Date(metadata.timeCreated));
+  } catch (error) {
+    document.getElementById('date-time').textContent = `Error: ${error.message}`;
+  }
+};
+
+// Initialize on page load
+document.addEventListener('DOMContentLoaded', async () => {
+  const user = await authenticate();
+  await loadImageData(user);
+
+  document.querySelector('#refreshBtn').addEventListener('click', async () => {
+    const user = await authenticate();
+    await loadImageData(user);
   });
 });
-
-imgRef.getMetadata()
-  .then((metadata) => {
-    console.log(metadata);
-    date = new Date(metadata.timeCreated);
-    console.log(date.getFullYear()+'-' + (date.getMonth()+1) + '-'+date.getDate());
-    console.log(date.getHours() + ":" + date.getMinutes() + ":" + date.getSeconds());
-    var time = (date.getHours() + ":" + date.getMinutes() + ":" + date.getSeconds());
-    var writtenDate = (date.getFullYear()+'-' + (date.getMonth()+1) + '-'+date.getDate());
-    document.getElementById("date-time").innerHTML = time + " at " + writtenDate;
-  })
-  .catch((error)=> {
-    console.error(error);
-  });
